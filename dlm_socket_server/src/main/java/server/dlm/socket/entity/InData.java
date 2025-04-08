@@ -17,7 +17,6 @@ public class InData {
     @Column(name = "raw_data", columnDefinition = "TEXT")
     private String rawData;
     private LocalDateTime receivedAt;
-    private Boolean isValid = true;
 
     @PrePersist
     public void prePersist() {
