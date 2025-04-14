@@ -74,6 +74,7 @@ public class TcpSocketServer {
                  BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream()))) {
 
                 // Message sample: 352840051234567|220.5|5.3|0.95|ok
+                // Path          : imei|voltage|current|powerFactor|status
                 log.info("Client {} connected", clientIp);
 
                 String rawData;
@@ -94,7 +95,7 @@ public class TcpSocketServer {
                         }
 
                         // parse message and save to database
-                        messageProcess(imei, rawData, parts);
+                        messageProcess(imei, rawData, parts, clientIp);
 
                     } catch (Exception ex) {
                         log.error("Failed to parse or save data from {}: {}", clientIp, rawData, ex);
@@ -110,10 +111,11 @@ public class TcpSocketServer {
         }).start();
     }
 
-    private void messageProcess(String imei, String rawData, String[] parts) {
+    private void messageProcess(String imei, String rawData, String[] parts, String clientIp) {
         InData inData = new InData();
         inData.setImei(imei);
         inData.setRawData(rawData);
+        inData.setIpClient(clientIp);
         inDataRepository.save(inData);
 
         MainData data = new MainData();

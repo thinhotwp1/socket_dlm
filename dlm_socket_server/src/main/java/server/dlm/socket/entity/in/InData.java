@@ -14,6 +14,7 @@ public class InData {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
     private String imei;
+    private String ipClient;
     @Column(name = "raw_data", columnDefinition = "TEXT")
     private String rawData;
     private LocalDateTime receivedAt;
