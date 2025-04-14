@@ -1,4 +1,4 @@
-package server.dlm.socket.entity;
+package server.dlm.socket.entity.out;
 
 import jakarta.persistence.*;
 import lombok.Data;

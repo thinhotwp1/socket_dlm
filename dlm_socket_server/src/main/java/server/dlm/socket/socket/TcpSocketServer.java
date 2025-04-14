@@ -3,12 +3,13 @@ package server.dlm.socket.socket;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
-import server.dlm.socket.entity.InData;
-import server.dlm.socket.entity.MainData;
-import server.dlm.socket.repository.InDataRepository;
-import server.dlm.socket.repository.MainDataRepository;
-import server.dlm.socket.repository.WhitelistRepository;
+import server.dlm.socket.entity.in.InData;
+import server.dlm.socket.entity.main.MainData;
+import server.dlm.socket.repository.in.InDataRepository;
+import server.dlm.socket.repository.main.MainDataRepository;
+import server.dlm.socket.repository.main.WhitelistRepository;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -23,6 +24,8 @@ import java.util.concurrent.ConcurrentHashMap;
 @Component
 @Log4j2
 public class TcpSocketServer {
+    @Value("${socket.server.port}")
+    private int portSocketServer;
 
     private final Set<String> activeConnections = ConcurrentHashMap.newKeySet();
 
@@ -36,27 +39,41 @@ public class TcpSocketServer {
     @PostConstruct
     public void startServer() {
         new Thread(() -> {
-            try (ServerSocket serverSocket = new ServerSocket(9001)) {
-                log.info("TCP Server started on port 9001");
-                while (true) {
-                    Socket socket = serverSocket.accept();
-                    String clientIp = socket.getInetAddress().getHostAddress();
-                    activeConnections.add(clientIp);
+            while (true) {
+                try (ServerSocket serverSocket = new ServerSocket(portSocketServer)) {
+                    log.info("✅ TCP Server started on port 9001");
 
-                    // save to database: connectedAt
-                    handleConnection(socket, clientIp);
+                    while (true) {
+                        Socket socket = serverSocket.accept();
+                        String clientIp = socket.getInetAddress().getHostAddress();
+                        activeConnections.add(clientIp);
+
+                        // Save to database: connectedAt (có thể dùng service)
+                        handleConnection(socket, clientIp);
+                    }
+
+                } catch (IOException e) {
+                    log.error("❌ Error in TCP Server: {}", e.getMessage(), e);
+                    try {
+                        log.info("⏳ Retrying to start server in 5 seconds...");
+                        Thread.sleep(5000);
+                    } catch (InterruptedException ie) {
+                        log.warn("Retry sleep interrupted", ie);
+                        Thread.currentThread().interrupt(); // restore interrupted status
+                        break;
+                    }
                 }
-            } catch (IOException e) {
-                e.printStackTrace();
             }
         }).start();
     }
+
 
     private void handleConnection(Socket socket, String clientIp) {
         new Thread(() -> {
             try (socket;
                  BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream()))) {
 
+                // Message sample: 352840051234567|220.5|5.3|0.95|ok
                 log.info("Client {} connected", clientIp);
 
                 String rawData;
@@ -106,7 +123,6 @@ public class TcpSocketServer {
         data.setCurrent(Double.parseDouble(parts[2]));
         data.setPowerFactor(Double.parseDouble(parts[3]));
         data.setStatus(parts[4]);
-
         mainDataRepository.save(data);
 
         log.info("Saved data for IMEI {}: {}", imei, data);

@@ -1,7 +1,7 @@
-package server.dlm.socket.repository;
+package server.dlm.socket.repository.out;
 
 import org.springframework.data.jpa.repository.JpaRepository;
-import server.dlm.socket.entity.OutData;
+import server.dlm.socket.entity.out.OutData;
 
 public interface OutDataRepository extends JpaRepository<OutData, Long> {
 }

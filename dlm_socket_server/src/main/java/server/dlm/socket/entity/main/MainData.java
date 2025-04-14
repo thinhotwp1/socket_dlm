@@ -1,4 +1,4 @@
-package server.dlm.socket.entity;
+package server.dlm.socket.entity.main;
 
 import jakarta.persistence.*;
 import lombok.Data;
@@ -6,16 +6,18 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "in_data")
+@Table(name = "main_data")
 @Data
-public class InData {
-
+public class MainData {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
     private String imei;
-    @Column(name = "raw_data", columnDefinition = "TEXT")
-    private String rawData;
+    private Double voltage;
+    private Double current;
+    private Double powerFactor;
+    private String status;
+    private LocalDateTime deviceTimestamp;
     private LocalDateTime receivedAt;
 
     @PrePersist
