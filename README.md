@@ -6,26 +6,25 @@
 
 ## 🚀 Table of Contents
 
-- [System Requirements](#system-requirements)
-- [Database Setup](#database-setup)
-- [Database Configuration](#database-configuration)
-- [Run the Application](#run-the-application)
-- [TCP Socket Testing Guide](#tcp-socket-testing-guide)
-- [Viewing Logs and Stored Data](#viewing-logs-and-stored-data)
+- [System Details](#system-details)
+- [Application Setup](#application-setup)
+- [Test the TCP Socket Server](#test-the-tcp-socket-server)
 
 ---
 
-## ✅ System Requirements
+## System Details
 
 - Java 17 or higher
 - Maven 3.6+
 - MySQL 8.x
-- Postman or Swagger UI for testing APIs
+- Swagger UI for testing APIs
 - A TCP socket client tool (e.g., `socket_client_test`)
 
 ---
 
-## 🛠 Step 1: 🛠 Database Setup
+## Application Setup
+
+### 🛠 Step 1: 🛠 Database Setup
 
 Ensure that MySQL 8.x is running and accessible.
 Create the following databases in MySQL:
@@ -36,7 +35,7 @@ CREATE DATABASE dlm_main CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE DATABASE dlm_out CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 ```
 
-## 🛠 Step 2: Configure application.properties
+### 🛠 Step 2: Configure application.properties
 Update your database credentials and connection URLs in src/main/resources/application.properties:
 
 ```properties
@@ -59,7 +58,7 @@ spring.datasource.out.password=password_root
 spring.datasource.out.driver-class-name=com.mysql.cj.jdbc.Driver
 ```
 
-## 🛠 Step 3: ▶️ Run the Application
+### 🛠 Step 3: ▶️ Run the Application
 ```java
 java -jar target/dlm_socket_server.jar
 ```
@@ -70,20 +69,28 @@ Start REST API server at [http://localhost:9000/swagger-ui/index.html#](http://l
 Start TCP socket listener on port 9001
 
 
-## 🧪 Test the TCP Socket Server
+## Test the TCP Socket Server
 
-## 🔹 Step 1: Open Swagger UI: [http://localhost:9000/swagger-ui/index.html#/whitelist-controller/importWhitelist](http://localhost:9000/swagger-ui/index.html#/whitelist-controller/importWhitelist)
+### 🔹 Step 1: Open Swagger UI: 
+
+[http://localhost:9000/swagger-ui/index.html#/whitelist-controller/importWhitelist](http://localhost:9000/swagger-ui/index.html#/whitelist-controller/importWhitelist)
 
 Use the POST /api/whitelist endpoint to add a valid IMEI:
 `["352840051234567","352840051234568"]`
 
-## 🔹 Step 2: Start socket_client_test application and connect to:
+![image](https://github.com/user-attachments/assets/21d90879-4aa8-4c4b-aea8-cd84cc4a0a49)
+
+
+### 🔹 Step 2: Start socket_client_test application and connect to:
 ```
 Host: 127.0.0.1
 Port: 9001
 ```
 
-## 🔹 Step 3: Send the following message: `352840051234567|220.5|5.3|0.95|ok`
+### 🔹 Step 3: Send the following message: 
+`352840051234567|220.5|5.3|0.95|ok`
+
+![image](https://github.com/user-attachments/assets/eed7a35f-f03f-4fad-bcb0-65a3a06399d8)
 
 This message will be:
 
@@ -93,5 +100,17 @@ This message will be:
 
 -> Saved into main_data table in the dlm_main database
 
-## 🔹 Step 4: Verify Results
+### 🔹 Step 4: Verify Results
+```sql
+USE dlm_in;
+SELECT * FROM in_data;
+```
+![image](https://github.com/user-attachments/assets/1ee30944-ed0c-4fef-9d87-855f6cbc2557)
 
+
+
+```sql
+USE dlm_main;
+SELECT * FROM main_data;
+```
+![image](https://github.com/user-attachments/assets/afe40584-06ac-4920-b8ed-7063043aa3de)
