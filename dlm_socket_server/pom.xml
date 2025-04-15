@@ -10,7 +10,7 @@
     </parent>
     <groupId>server.dlm</groupId>
     <artifactId>dlm_socket_server</artifactId>
-    <version>0.0.1-SNAPSHOT</version>
+    <version>1.0.0</version>
     <name>dlm_socket_server</name>
     <description>dlm_socket_server</description>
     <url/>
