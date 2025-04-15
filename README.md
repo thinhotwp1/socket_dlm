@@ -60,7 +60,7 @@ spring.datasource.out.driver-class-name=com.mysql.cj.jdbc.Driver
 
 ### 🛠 Step 3: ▶️ Run the Application
 ```java
-java -jar target/dlm_socket_server.jar
+java -jar test/dlm_socket_server-1.0.0.jar
 ```
 The application will:
 
