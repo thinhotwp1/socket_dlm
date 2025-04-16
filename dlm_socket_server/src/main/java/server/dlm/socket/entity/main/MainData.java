@@ -1,7 +1,7 @@
 package server.dlm.socket.entity.main;
 
 import jakarta.persistence.*;
-import lombok.Data;
+        import lombok.Data;
 
 import java.time.LocalDateTime;
 
@@ -13,6 +13,7 @@ public class MainData {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
     private String imei;
+    private String socketSessionId;
     private Double voltage;
     private Double current;
     private Double powerFactor;

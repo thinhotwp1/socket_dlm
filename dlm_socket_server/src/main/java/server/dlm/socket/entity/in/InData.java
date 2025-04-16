@@ -15,6 +15,7 @@ public class InData {
     private Long id;
     private String imei;
     private String ipClient;
+    private String socketSessionId;
     @Column(name = "raw_data", columnDefinition = "TEXT")
     private String rawData;
     private LocalDateTime receivedAt;
