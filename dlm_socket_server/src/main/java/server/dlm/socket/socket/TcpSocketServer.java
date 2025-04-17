@@ -1,6 +1,8 @@
+
 package server.dlm.socket.socket;
 
 import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -19,6 +21,7 @@ import java.net.Socket;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Component
@@ -36,11 +39,15 @@ public class TcpSocketServer {
     @Autowired
     private WhitelistRepository whitelistRepository;
 
+    private ServerSocket serverSocket;
+
+
     @PostConstruct
     public void startServer() {
         new Thread(() -> {
             while (true) {
-                try (ServerSocket serverSocket = new ServerSocket(portSocketServer)) {
+                try {
+                    serverSocket = new ServerSocket(portSocketServer);
                     log.info("✅ TCP Server started on port 9001");
 
                     while (true) {
@@ -48,7 +55,7 @@ public class TcpSocketServer {
                         String clientIp = socket.getInetAddress().getHostAddress();
                         activeConnections.add(clientIp);
 
-                        // Save to database: connectedAt (có thể dùng service)
+                        // handle socket connection
                         handleConnection(socket, clientIp);
                     }
 
@@ -65,6 +72,18 @@ public class TcpSocketServer {
                 }
             }
         }).start();
+    }
+
+    @PreDestroy
+    public void shutdownServer() {
+        try {
+            if (serverSocket != null && !serverSocket.isClosed()) {
+                serverSocket.close();
+                log.info("🛑 TCP Server stopped and port {} released", portSocketServer);
+            }
+        } catch (IOException e) {
+            log.error("Error closing ServerSocket", e);
+        }
     }
 
 
@@ -84,7 +103,7 @@ public class TcpSocketServer {
                     try {
                         String[] parts = rawData.split("\\|");
                         if (parts.length != 5) {
-                            log.error("Invalid message format: {}", rawData);
+                            log.error("Invalid message format: {}, sample message 'imei|voltage|current|powerFactor|status': 352840051234567|220.5|5.3|0.95|ok", rawData);
                             continue;
                         }
 
@@ -112,22 +131,25 @@ public class TcpSocketServer {
     }
 
     private void messageProcess(String imei, String rawData, String[] parts, String clientIp) {
+        String socketSessionId = UUID.randomUUID().toString();
         InData inData = new InData();
         inData.setImei(imei);
         inData.setRawData(rawData);
         inData.setIpClient(clientIp);
+        inData.setSocketSessionId(socketSessionId);
         inDataRepository.save(inData);
 
-        MainData data = new MainData();
-        data.setImei(imei);
-        data.setDeviceTimestamp(LocalDateTime.now(ZoneOffset.UTC)); // or extract from device if available
-        data.setVoltage(Double.parseDouble(parts[1]));
-        data.setCurrent(Double.parseDouble(parts[2]));
-        data.setPowerFactor(Double.parseDouble(parts[3]));
-        data.setStatus(parts[4]);
-        mainDataRepository.save(data);
+        MainData outData = new MainData();
+        outData.setImei(imei);
+        outData.setDeviceTimestamp(LocalDateTime.now(ZoneOffset.UTC)); // or extract from device if available
+        outData.setVoltage(Double.parseDouble(parts[1]));
+        outData.setCurrent(Double.parseDouble(parts[2]));
+        outData.setPowerFactor(Double.parseDouble(parts[3]));
+        outData.setStatus(parts[4]);
+        outData.setSocketSessionId(socketSessionId);
+        mainDataRepository.save(outData);
 
-        log.info("Saved data for IMEI {}: {}", imei, data);
+        log.info("Saved data for IMEI {}: {}", imei, outData);
     }
 
     public int getActiveConnectionCount() {
