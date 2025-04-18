@@ -1,18 +1,23 @@
 package server.dlm.socket.entity.out;
 
 import jakarta.persistence.*;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
 import lombok.Data;
+import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "out_data")
 @Data
+@Builder
+@AllArgsConstructor
+@NoArgsConstructor
 public class OutData {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
-
     private String imei;
 
     // e.g., ON, OFF
@@ -21,12 +26,10 @@ public class OutData {
     @Column(name = "instruction_content", columnDefinition = "TEXT")
     private String instructionContent;
 
-    // e.g., PENDING, EXECUTED, FAILED
+    // e.g., WAITING, EXECUTED, FAILED
     private String executionStatus;
 
-    // Track if socket is live or not at execution time
     private Boolean socketLive;
-
     private LocalDateTime createdAt;
     private LocalDateTime executedAt;
 

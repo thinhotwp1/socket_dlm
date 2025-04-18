@@ -17,7 +17,14 @@ public class Whitelist {
     @Column(unique = true, nullable = false)
     private String imei;
 
+    private boolean socketConnected = false;
+
     public Whitelist(String imei) {
         this.imei = imei;
+    }
+
+    public Whitelist(String imei, boolean socketConnected) {
+        this.imei = imei;
+        this.socketConnected = socketConnected;
     }
 }

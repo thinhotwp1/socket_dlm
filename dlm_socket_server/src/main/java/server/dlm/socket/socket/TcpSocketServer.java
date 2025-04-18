@@ -9,6 +9,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import server.dlm.socket.entity.in.InData;
 import server.dlm.socket.entity.main.MainData;
+import server.dlm.socket.entity.main.Whitelist;
 import server.dlm.socket.repository.in.InDataRepository;
 import server.dlm.socket.repository.main.MainDataRepository;
 import server.dlm.socket.repository.main.WhitelistRepository;
@@ -20,6 +21,8 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -30,7 +33,7 @@ public class TcpSocketServer {
     @Value("${socket.server.port}")
     private int portSocketServer;
 
-    private final Set<String> activeConnections = ConcurrentHashMap.newKeySet();
+    private final HashMap<String, String> activeConnections = new HashMap<>();
 
     @Autowired
     private InDataRepository inDataRepository;
@@ -48,12 +51,11 @@ public class TcpSocketServer {
             while (true) {
                 try {
                     serverSocket = new ServerSocket(portSocketServer);
-                    log.info("✅ TCP Server started on port 9001");
+                    log.info("✅ TCP Server started on port {}", portSocketServer);
 
                     while (true) {
                         Socket socket = serverSocket.accept();
                         String clientIp = socket.getInetAddress().getHostAddress();
-                        activeConnections.add(clientIp);
 
                         // handle socket connection
                         handleConnection(socket, clientIp);
@@ -61,14 +63,6 @@ public class TcpSocketServer {
 
                 } catch (IOException e) {
                     log.error("❌ Error in TCP Server: {}", e.getMessage(), e);
-                    try {
-                        log.info("⏳ Retrying to start server in 5 seconds...");
-                        Thread.sleep(5000);
-                    } catch (InterruptedException ie) {
-                        log.warn("Retry sleep interrupted", ie);
-                        Thread.currentThread().interrupt(); // restore interrupted status
-                        break;
-                    }
                 }
             }
         }).start();
@@ -113,6 +107,8 @@ public class TcpSocketServer {
                             continue;
                         }
 
+                        if (connectionValidate(socket, clientIp, imei)) continue;
+
                         // parse message and save to database
                         messageProcess(imei, rawData, parts, clientIp);
 
@@ -124,10 +120,26 @@ public class TcpSocketServer {
             } catch (Exception e) {
                 log.error("Connection error with client {}", clientIp, e);
             } finally {
+                Whitelist whitelist = whitelistRepository.findByImei(activeConnections.get(clientIp));
+                whitelist.setSocketConnected(false);
+                whitelistRepository.save(whitelist);
                 activeConnections.remove(clientIp);
-                log.info("Client {} disconnected", clientIp);
+                log.info("Client {} - {} disconnected", clientIp, activeConnections.get(clientIp));
             }
         }).start();
+    }
+
+    private boolean connectionValidate(Socket socket, String clientIp, String imei) {
+        activeConnections.put(socket.getInetAddress().getHostAddress(), imei);
+        if (activeConnections.containsKey(clientIp) && !activeConnections.get(clientIp).equals(imei)) {
+            log.error("Only one imei for one socket connection !");
+            return true;
+        }
+
+        Whitelist whitelist = whitelistRepository.findByImei(imei);
+        whitelist.setSocketConnected(true);
+        whitelistRepository.save(whitelist);
+        return false;
     }
 
     private void messageProcess(String imei, String rawData, String[] parts, String clientIp) {

@@ -8,4 +8,5 @@ import server.dlm.socket.entity.main.Whitelist;
 public interface
 WhitelistRepository extends JpaRepository<Whitelist, Long> {
     boolean existsByImei(String imei);
+    Whitelist findByImei(String imei);
 }

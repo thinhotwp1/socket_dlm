@@ -6,5 +6,5 @@ import server.dlm.socket.entity.out.OutData;
 import java.util.List;
 
 public interface OutDataRepository extends JpaRepository<OutData, Long> {
-    List<OutData> findByExecutionStatus(String executionStatus);
+    List<OutData> findByExecutionStatusAndImeiIn(String executionStatus, List<String> imeiWhiteList);
 }
