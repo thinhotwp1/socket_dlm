@@ -5,6 +5,6 @@ import server.dlm.socket.entity.out.OutBox;
 
 import java.util.List;
 
-public interface OutDataRepository extends JpaRepository<OutBox, Long> {
-    List<OutBox> findByExecutionStatusAndImeiIn(String executionStatus, List<String> imeiWhiteList);
+public interface OutBoxRepository extends JpaRepository<OutBox, Long> {
+    List<OutBox> findByProcessStatus(String status);
 }

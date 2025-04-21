@@ -22,9 +22,9 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Component
 @Log4j2
@@ -42,7 +42,7 @@ public class TcpSocketServer {
     @Autowired
     private MasterTcpSocketRepository masterTcpSocketRepository;
 
-    private final Map<String, String> activeConnections = new HashMap<>();
+    private final Map<String, Socket> imeiToSocketMap = new ConcurrentHashMap<>();
     private final ObjectMapper objectMapper = new ObjectMapper();
     private ServerSocket serverSocket;
 
@@ -79,7 +79,7 @@ public class TcpSocketServer {
 
     private void handleConnection(Socket socket, String clientIp) {
         new Thread(() -> {
-            String socketNo = UUID.randomUUID().toString(); // Create socketNo
+            String socketNo = UUID.randomUUID().toString();
             String imei = null;
 
             try (socket;
@@ -91,28 +91,22 @@ public class TcpSocketServer {
                     log.info("📥 Received from {}: {}", clientIp, rawData);
 
                     if (rawData.startsWith("{") && rawData.endsWith("}")) {
-                        // JSON message
                         try {
                             JsonNode json = objectMapper.readTree(rawData);
                             if (json.has("imei")) {
                                 imei = json.get("imei").asText();
-//                                if (!masterTcpSocketRepository.existsByDeviceId(imei)) {
-//                                    log.warn("IMEI {} not registered in masterTcpSockets", imei);
-//                                    continue;
-//                                }
-
                                 updateConnectionState(imei, socketNo, true);
-                                activeConnections.put(clientIp, imei);
+                                imeiToSocketMap.put(imei, socket);
                                 saveRawOnly(rawData, clientIp, imei, socketNo);
 
-                                if (json.hasNonNull("voltage") && json.hasNonNull("current")
-                                        && json.hasNonNull("powerFactor") && json.hasNonNull("status")) {
+                                if (json.hasNonNull("voltage") && json.hasNonNull("current") &&
+                                        json.hasNonNull("powerFactor") && json.hasNonNull("status")) {
                                     processJsonMessage(json, imei, socketNo);
                                 } else {
                                     log.warn("⚠️ Missing data fields in JSON for IMEI {}", imei);
                                 }
                             } else {
-                                log.warn("⚠️ JSON does not contain IMEI: {}", rawData);
+                                log.warn("⚠️ JSON missing IMEI: {}", rawData);
                             }
                         } catch (Exception e) {
                             log.warn("⚠️ Invalid JSON format: {}", e.getMessage());
@@ -120,26 +114,24 @@ public class TcpSocketServer {
                         continue;
                     }
 
-                    // Handle <...> custom packet as normal `imei|v|c|pf|status`
                     if (rawData.startsWith("<") && rawData.endsWith(">")) {
-                        rawData = rawData.substring(1, rawData.length() - 1); // remove <>
+                        rawData = rawData.substring(1, rawData.length() - 1);
                     }
 
-                    // Pipe-separated format
                     String[] parts = rawData.split("\\|");
                     if (parts.length == 5) {
                         imei = parts[0];
                         if (!masterTcpSocketRepository.existsByDeviceId(imei)) {
-                            log.warn("IMEI {} not registered in masterTcpSockets", imei);
+                            log.warn("IMEI {} not registered", imei);
                             continue;
                         }
 
                         updateConnectionState(imei, socketNo, true);
-                        activeConnections.put(clientIp, imei);
+                        imeiToSocketMap.put(imei, socket);
                         saveRawOnly(rawData, clientIp, imei, socketNo);
                         processIncomingMessage(imei, parts, socketNo);
                     } else {
-                        log.warn("❗ Unrecognized format and unable to parse: {}", rawData);
+                        log.warn("❗ Unrecognized format: {}", rawData);
                     }
                 }
 
@@ -150,7 +142,7 @@ public class TcpSocketServer {
                     updateConnectionState(imei, socketNo, false);
                     log.info("❎ IMEI {} disconnected (socket {})", imei, socketNo);
                 }
-                activeConnections.remove(clientIp);
+                imeiToSocketMap.remove(imei);
             }
         }).start();
     }
@@ -162,7 +154,6 @@ public class TcpSocketServer {
         tcpSocket.setSysDts(LocalDateTime.now());
         masterTcpSocketRepository.save(tcpSocket);
     }
-
 
     private void processIncomingMessage(String imei, String[] parts, String socketNo) {
         try {
@@ -176,13 +167,11 @@ public class TcpSocketServer {
             mainBox.setDeviceTimestamp(LocalDateTime.now(ZoneOffset.UTC));
             mainBoxRepository.save(mainBox);
 
-            log.info("✅ Parsed data saved for IMEI {}: voltage={} current={} pf={} status={}",
-                    imei, parts[1], parts[2], parts[3], parts[4]);
+            log.info("✅ Parsed data saved for IMEI {}", imei);
         } catch (Exception e) {
             log.warn("⚠️ Failed to parse data for IMEI {}: {}", imei, e.getMessage());
         }
     }
-
 
     private void processJsonMessage(JsonNode json, String imei, String socketNo) {
         try {
@@ -196,17 +185,11 @@ public class TcpSocketServer {
             mainBox.setDeviceTimestamp(LocalDateTime.now(ZoneOffset.UTC));
             mainBoxRepository.save(mainBox);
 
-            log.info("✅ JSON parsed & saved for IMEI {}: voltage={} current={} pf={} status={}",
-                    imei,
-                    json.get("voltage").asDouble(),
-                    json.get("current").asDouble(),
-                    json.get("powerFactor").asDouble(),
-                    json.get("status").asText());
+            log.info("✅ JSON parsed & saved for IMEI {}", imei);
         } catch (Exception e) {
-            log.warn("⚠️ Failed to parse JSON values for IMEI {}: {}", imei, e.getMessage());
+            log.warn("⚠️ Failed to parse JSON for IMEI {}: {}", imei, e.getMessage());
         }
     }
-
 
     private void saveRawOnly(String rawData, String clientIp, String imei, String socketNo) {
         InBox inBox = new InBox();
@@ -218,10 +201,28 @@ public class TcpSocketServer {
         inBox.setProcessStatus("N");
         inBoxRepository.save(inBox);
 
-        log.info("📥 Raw message saved for IMEI {}: {}", imei, rawData);
+        log.info("📥 Raw message saved for IMEI {}", imei);
     }
 
     public int getActiveConnectionCount() {
-        return activeConnections.size();
+        return imeiToSocketMap.size();
+    }
+
+    public boolean sendMessageToClient(String imei, String message) {
+        Socket socket = imeiToSocketMap.get(imei);
+        if (socket == null || socket.isClosed()) {
+            log.warn("❌ Cannot send message, socket for IMEI {} is not active", imei);
+            return false;
+        }
+
+        try {
+            socket.getOutputStream().write((message + "\n").getBytes());
+            socket.getOutputStream().flush();
+            log.info("📤 Sent message to IMEI {}: {}", imei, message);
+            return true;
+        } catch (IOException e) {
+            log.error("❌ Failed to send message to IMEI {}: {}", imei, e.getMessage());
+            return false;
+        }
     }
 }
