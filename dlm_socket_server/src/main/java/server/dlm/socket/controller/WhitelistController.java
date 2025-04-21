@@ -12,8 +12,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Description;
 import org.springframework.web.bind.annotation.*;
 import server.dlm.socket.dto.ResponseData;
-import server.dlm.socket.entity.main.Whitelist;
-import server.dlm.socket.repository.main.WhitelistRepository;
+import server.dlm.socket.entity.main.MasterTcpSocket;
+import server.dlm.socket.repository.main.MasterTcpSocketRepository;
 
 import java.util.List;
 
@@ -24,7 +24,7 @@ import java.util.List;
 public class WhitelistController {
 
     @Autowired
-    private WhitelistRepository whitelistRepository;
+    private MasterTcpSocketRepository masterTcpSocketRepository;
 
     @Operation(summary = "Import IMEI list to whitelist")
     @ApiResponses({
@@ -48,7 +48,7 @@ public class WhitelistController {
     public ResponseData<?> importWhitelist(@RequestBody List<String> imeiList) {
         imeiList.forEach(imei -> {
             try {
-                if (!whitelistRepository.existsByImei(imei)) whitelistRepository.save(new Whitelist(imei));
+                if (!masterTcpSocketRepository.existsByDeviceId(imei)) masterTcpSocketRepository.save(new MasterTcpSocket(imei));
             } catch (Exception e) {
                 log.error("Import Whitelist error: {}", String.valueOf(e));
             }
@@ -66,7 +66,7 @@ public class WhitelistController {
     })
     @GetMapping("/list")
     public ResponseData<?> getWhitelist() {
-        List<String> imeiList = whitelistRepository.findAll().stream().map(Whitelist::getImei).toList();
+        List<String> imeiList = masterTcpSocketRepository.findAll().stream().map(MasterTcpSocket::getDeviceId).toList();
         return new ResponseData<>().success(imeiList);
     }
 
@@ -81,7 +81,7 @@ public class WhitelistController {
     })
     @GetMapping("/check/{imei}")
     public ResponseData<?> checkWhitelist(@PathVariable String imei) {
-        boolean exists = whitelistRepository.existsByImei(imei);
+        boolean exists = masterTcpSocketRepository.existsByDeviceId(imei);
         return new ResponseData<>().success(exists);
     }
 }
