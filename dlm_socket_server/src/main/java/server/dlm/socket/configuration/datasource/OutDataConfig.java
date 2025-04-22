@@ -1,4 +1,4 @@
-package server.dlm.socket.configuration.database;
+package server.dlm.socket.configuration.datasource;
 
 import jakarta.persistence.EntityManagerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -22,7 +22,7 @@ import java.util.Map;
         entityManagerFactoryRef = "outEntityManagerFactory",
         transactionManagerRef = "outTransactionManager"
 )
-public class OutDatabaseConfig {
+public class OutDataConfig {
 
     @Bean(name = "outDataSource")
     @ConfigurationProperties(prefix = "spring.datasource.out")

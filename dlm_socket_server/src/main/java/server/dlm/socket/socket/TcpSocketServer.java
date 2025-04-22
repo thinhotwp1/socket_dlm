@@ -77,6 +77,17 @@ public class TcpSocketServer {
         }
     }
 
+    /**
+     TEXT DATA SAMPLE: <352840051234567|220.5|5.3|0.95|ok>
+     JSON DATA SAMPLE:
+     {
+     "imei": "352840051234567",
+     "voltage": 220.5,
+     "current": 5.3,
+     "powerFactor": 0.95,
+     "status": "ok"
+     }
+     */
     private void handleConnection(Socket socket, String clientIp) {
         new Thread(() -> {
             String socketNo = UUID.randomUUID().toString();
@@ -87,7 +98,9 @@ public class TcpSocketServer {
                 log.info("🔌 Client {} connected", clientIp);
 
                 String rawData;
+
                 while ((rawData = reader.readLine()) != null) {
+                    rawData = rawData.trim();
                     log.info("📥 Received from {}: {}", clientIp, rawData);
 
                     if (rawData.startsWith("{") && rawData.endsWith("}")) {
@@ -112,26 +125,26 @@ public class TcpSocketServer {
                             log.warn("⚠️ Invalid JSON format: {}", e.getMessage());
                         }
                         continue;
-                    }
-
-                    if (rawData.startsWith("<") && rawData.endsWith(">")) {
+                    } else if (rawData.startsWith("<") && rawData.endsWith(">")) {
                         rawData = rawData.substring(1, rawData.length() - 1);
-                    }
 
-                    String[] parts = rawData.split("\\|");
-                    if (parts.length == 5) {
-                        imei = parts[0];
-                        if (!masterTcpSocketRepository.existsByDeviceId(imei)) {
-                            log.warn("IMEI {} not registered", imei);
-                            continue;
+                        String[] parts = rawData.split("\\|");
+                        if (parts.length == 5) {
+                            imei = parts[0];
+                            if (!masterTcpSocketRepository.existsByDeviceId(imei)) {
+                                log.warn("IMEI {} not registered", imei);
+                                continue;
+                            }
+
+                            updateConnectionState(imei, socketNo, true);
+                            imeiToSocketMap.put(imei, socket);
+                            saveRawOnly(rawData, clientIp, imei, socketNo);
+                            processIncomingMessage(imei, parts, socketNo);
+                        } else {
+                            log.warn("❗ Invalid message: {}", rawData);
                         }
-
-                        updateConnectionState(imei, socketNo, true);
-                        imeiToSocketMap.put(imei, socket);
-                        saveRawOnly(rawData, clientIp, imei, socketNo);
-                        processIncomingMessage(imei, parts, socketNo);
                     } else {
-                        log.warn("❗ Unrecognized format: {}", rawData);
+                        log.warn("❗ Invalid message: {} ", rawData);
                     }
                 }
 
@@ -208,21 +221,19 @@ public class TcpSocketServer {
         return imeiToSocketMap.size();
     }
 
-    public boolean sendMessageToClient(String imei, String message) {
+    public void sendMessageToClient(String imei, String message) {
         Socket socket = imeiToSocketMap.get(imei);
         if (socket == null || socket.isClosed()) {
             log.warn("❌ Cannot send message, socket for IMEI {} is not active", imei);
-            return false;
+            return;
         }
 
         try {
             socket.getOutputStream().write((message + "\n").getBytes());
             socket.getOutputStream().flush();
             log.info("📤 Sent message to IMEI {}: {}", imei, message);
-            return true;
         } catch (IOException e) {
             log.error("❌ Failed to send message to IMEI {}: {}", imei, e.getMessage());
-            return false;
         }
     }
 }
