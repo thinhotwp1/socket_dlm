@@ -26,7 +26,7 @@
 
 ### 🛠 Step 1: 🛠 Database Setup
 
-Ensure that MySQL 8.x is running and accessible.
+Ensure that MySQL 8.x is running and accessible. This project now using MySQL in localhost:3306
 Create the following databases in MySQL:
 
 ```sql
@@ -35,45 +35,73 @@ CREATE DATABASE dlm_main CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE DATABASE dlm_out CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 ```
 
+![image](https://github.com/user-attachments/assets/2fe95ccf-bc6e-4a29-9a24-5b233b769e0b)
+
+
 ### 🛠 Step 2: Configure application.properties
 Update your database credentials and connection URLs in src/main/resources/application.properties:
 
 ```properties
 # IN Database
-spring.datasource.in.jdbc-url=jdbc:mysql://<ip>:<port>/dlm_in?useSSL=false&serverTimezone=UTC
+spring.datasource.in.jdbc-url=jdbc:mysql://localhost:3306/dlm_in?useSSL=false&serverTimezone=UTC
 spring.datasource.in.username=root
-spring.datasource.in.password=password_root
+spring.datasource.in.password=root
 spring.datasource.in.driver-class-name=com.mysql.cj.jdbc.Driver
 
-# MAIN Database
-spring.datasource.main.jdbc-url=jdbc:mysql://<ip>:<port>/dlm_main?useSSL=false&serverTimezone=UTC
+# MAIN DB
+spring.datasource.main.jdbc-url=jdbc:mysql://localhost:3306/dlm_main?useSSL=false&serverTimezone=UTC
 spring.datasource.main.username=root
-spring.datasource.main.password=password_root
+spring.datasource.main.password=root
 spring.datasource.main.driver-class-name=com.mysql.cj.jdbc.Driver
 
-# OUT Database
-spring.datasource.out.jdbc-url=jdbc:mysql://<ip>:<port>/dlm_out?useSSL=false&serverTimezone=UTC
+# OUT DB
+spring.datasource.out.jdbc-url=jdbc:mysql://localhost:3306/dlm_out?useSSL=false&serverTimezone=UTC
 spring.datasource.out.username=root
-spring.datasource.out.password=password_root
+spring.datasource.out.password=root
 spring.datasource.out.driver-class-name=com.mysql.cj.jdbc.Driver
 ```
 
-### 🛠 Step 3: ▶️ Run the Application
+![image](https://github.com/user-attachments/assets/56f44e14-3fda-413e-9b8a-1bcd70fb1cdd)
+
+
+### 🛠 Step 3: ▶️ Build the Application
 ```java
-java -jar test/dlm_socket_server-1.0.0.jar
+Install project with maven: Maven -> Install
 ```
+
+![image](https://github.com/user-attachments/assets/3074bad8-a6db-456a-abcc-efe40264d8fe)
+
+The application will created in target folder:
+
+![image](https://github.com/user-attachments/assets/c02dbbad-d139-4b79-9239-f6c11f7af42a)
+
+
+### 🛠 Step 3: ▶️ Run the Application in server
+```java
+Step 1: Coppy dlm_socket_server-1.0.0.jar into server
+```
+
+![image](https://github.com/user-attachments/assets/c666bd7d-7da7-40af-ab1c-a13d9adb6747)
+
+```java
+Step 2: java -jar dlm_socket_server-1.0.0.jar
+```
+
+![image](https://github.com/user-attachments/assets/338e3278-5bbf-4deb-93ac-08430d9a60c2)
+
+
 The application will:
 
-Start REST API server at [http://localhost:9000/swagger-ui/index.html#](http://localhost:9000/swagger-ui/index.html#/)
+Start REST API server at [http://IP_SERVER:9000/swagger-ui/index.html#](http://localhost:9000/swagger-ui/index.html#/)
 
-Start TCP socket listener on port 9001
+Start TCP socket listener on IP_SERVER:9001
 
 
 ## Test the TCP Socket Server
 
 ### 🔹 Step 1: Open Swagger UI: 
 
-[http://localhost:9000/swagger-ui/index.html#/whitelist-controller/importWhitelist](http://localhost:9000/swagger-ui/index.html#/whitelist-controller/importWhitelist)
+[http://IP_SERVER:9000/swagger-ui/index.html#/whitelist-controller/importWhitelist](http://localhost:9000/swagger-ui/index.html#/whitelist-controller/importWhitelist)
 
 Use the POST /api/whitelist endpoint to add a valid IMEI:
 `["352840051234567","352840051234568"]`
@@ -81,11 +109,17 @@ Use the POST /api/whitelist endpoint to add a valid IMEI:
 ![image](https://github.com/user-attachments/assets/21d90879-4aa8-4c4b-aea8-cd84cc4a0a49)
 
 
-### 🔹 Step 2: Start socket_client_test application and connect to:
+### 🔹 Step 2: Start socket_client_test (tool test in project) and connect to:
+
+![image](https://github.com/user-attachments/assets/cb511c3f-9c0e-453a-bf67-537b51616e9d)
+
 ```
-Host: 127.0.0.1
+Host: SERVER_IP (in this test is 127.0.0.1)
 Port: 9001
 ```
+
+![image](https://github.com/user-attachments/assets/2e370a83-d46f-48e8-a7b9-3367dde25767)
+
 
 ### 🔹 Step 3: Send the following message: 
 `352840051234567|220.5|5.3|0.95|ok`
