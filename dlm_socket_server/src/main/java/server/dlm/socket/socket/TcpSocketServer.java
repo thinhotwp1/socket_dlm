@@ -18,6 +18,7 @@ import server.dlm.socket.repository.main.MasterTcpSocketRepository;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.time.LocalDateTime;
@@ -50,8 +51,11 @@ public class TcpSocketServer {
     public void startServer() {
         new Thread(() -> {
             try {
-                serverSocket = new ServerSocket(portSocketServer);
-                log.info("✅ TCP Server started on port {}", portSocketServer);
+                // Listen on all interfaces (IPv4 & IPv6 compatible)
+                InetAddress bindAddr = InetAddress.getByName("::");
+                serverSocket = new ServerSocket(portSocketServer, 50, bindAddr);
+
+                log.info("✅ TCP Server (IPv4 & IPv6) started on [{}]:{}", bindAddr.getHostAddress(), portSocketServer);
 
                 while (true) {
                     Socket socket = serverSocket.accept();
@@ -78,15 +82,15 @@ public class TcpSocketServer {
     }
 
     /**
-     TEXT DATA SAMPLE: <352840051234567|220.5|5.3|0.95|ok>
-     JSON DATA SAMPLE:
+     <p>MESSAGE TEXT SAMPLE: <352840051234567|220.5|5.3|0.95|ok></p>
+     <p>MESSAGE JSON SAMPLE:
      {
      "imei": "352840051234567",
      "voltage": 220.5,
      "current": 5.3,
      "powerFactor": 0.95,
      "status": "ok"
-     }
+     }</p>
      */
     private void handleConnection(Socket socket, String clientIp) {
         new Thread(() -> {
