@@ -31,6 +31,9 @@ import java.util.concurrent.ConcurrentHashMap;
 @Log4j2
 public class TcpSocketServer {
 
+    @Value("${socket.server.send-delay-ms}")
+    private long sendDelayMs;
+
     @Value("${socket.server.port}")
     private int portSocketServer;
 
@@ -46,6 +49,7 @@ public class TcpSocketServer {
     private final Map<String, Socket> imeiToSocketMap = new ConcurrentHashMap<>();
     private final ObjectMapper objectMapper = new ObjectMapper();
     private ServerSocket serverSocket;
+    private final Map<String, Long> imeiToLastSentTime = new ConcurrentHashMap<>();
 
     @PostConstruct
     public void startServer() {
@@ -232,12 +236,24 @@ public class TcpSocketServer {
             return;
         }
 
-        try {
-            socket.getOutputStream().write((message + "\n").getBytes());
-            socket.getOutputStream().flush();
-            log.info("📤 Sent message to IMEI {}: {}", imei, message);
-        } catch (IOException e) {
-            log.error("❌ Failed to send message to IMEI {}: {}", imei, e.getMessage());
+        synchronized (imei.intern()) {
+            Long lastSent = imeiToLastSentTime.getOrDefault(imei, 0L);
+            long now = System.currentTimeMillis();
+            long waitTime = sendDelayMs - (now - lastSent);
+            if (waitTime > 0) {
+                try {
+                    Thread.sleep(waitTime);
+                } catch (InterruptedException ignored) {}
+            }
+
+            try {
+                socket.getOutputStream().write((message + "\n").getBytes());
+                socket.getOutputStream().flush();
+                imeiToLastSentTime.put(imei, System.currentTimeMillis());
+                log.info("📤 Sent message to IMEI {}: {}", imei, message);
+            } catch (IOException e) {
+                log.error("❌ Failed to send message to IMEI {}: {}", imei, e.getMessage());
+            }
         }
     }
 }
