@@ -18,14 +18,17 @@ import server.dlm.socket.repository.main.MasterTcpSocketRepository;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @Component
 @Log4j2
@@ -49,7 +52,7 @@ public class TcpSocketServer {
     private final Map<String, Socket> imeiToSocketMap = new ConcurrentHashMap<>();
     private final ObjectMapper objectMapper = new ObjectMapper();
     private ServerSocket serverSocket;
-    private final Map<String, Long> imeiToLastSentTime = new ConcurrentHashMap<>();
+    private final Map<String, Long> imeiToLastReceivedTime = new ConcurrentHashMap<>();
 
     @PostConstruct
     public void startServer() {
@@ -73,33 +76,35 @@ public class TcpSocketServer {
         }).start();
     }
 
-    @PreDestroy
-    public void shutdownServer() {
-        try {
-            if (serverSocket != null && !serverSocket.isClosed()) {
-                serverSocket.close();
-                log.info("🛑 TCP Server stopped and port {} released", portSocketServer);
-            }
-        } catch (IOException e) {
-            log.error("Error closing ServerSocket", e);
-        }
-    }
-
     /**
-     <p>MESSAGE TEXT SAMPLE: <352840051234567|220.5|5.3|0.95|ok></p>
-     <p>MESSAGE JSON SAMPLE:
-     {
-     "imei": "352840051234567",
-     "voltage": 220.5,
-     "current": 5.3,
-     "powerFactor": 0.95,
-     "status": "ok"
-     }</p>
+     * <p>MESSAGE TEXT SAMPLE: <352840051234567|220.5|5.3|0.95|ok></p>
+     * <p>MESSAGE JSON SAMPLE:
+     * {
+     * "imei": "352840051234567",
+     * "voltage": 220.5,
+     * "current": 5.3,
+     * "powerFactor": 0.95,
+     * "status": "ok"
+     * }</p>
      */
     private void handleConnection(Socket socket, String clientIp) {
         new Thread(() -> {
+
             String socketNo = UUID.randomUUID().toString();
             String imei = null;
+            AtomicBoolean hasReceivedData = new AtomicBoolean(false);
+
+            // Scheduler to close connection if after 30s no received any message
+            ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+            ScheduledFuture<?> timeoutTask = scheduler.schedule(() -> {
+                if (!hasReceivedData.get()) {
+                    try {
+                        log.warn("⏱️ No data received within 30s from client {} → closing connection", clientIp);
+                        socket.close();
+                    } catch (IOException ignored) {
+                    }
+                }
+            }, 30, TimeUnit.SECONDS);
 
             try (socket;
                  BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream()))) {
@@ -108,14 +113,27 @@ public class TcpSocketServer {
                 String rawData;
 
                 while ((rawData = reader.readLine()) != null) {
+                    hasReceivedData.set(true);
                     rawData = rawData.trim();
                     log.info("📥 Received from {}: {}", clientIp, rawData);
+
+                    long now = System.currentTimeMillis();
 
                     if (rawData.startsWith("{") && rawData.endsWith("}")) {
                         try {
                             JsonNode json = objectMapper.readTree(rawData);
                             if (json.has("imei")) {
                                 imei = json.get("imei").asText();
+
+                                // Check sending rate
+                                long lastTime = imeiToLastReceivedTime.getOrDefault(imei, 0L);
+                                long elapsed = now - lastTime;
+                                if (elapsed < sendDelayMs) {
+                                    log.warn("⏱️ IMEI {} sending too fast ({}ms < {}ms), message ignored", imei, elapsed, sendDelayMs);
+                                    continue;
+                                }
+                                imeiToLastReceivedTime.put(imei, now);
+
                                 updateConnectionState(imei, socketNo, true);
                                 imeiToSocketMap.put(imei, socket);
                                 saveRawOnly(rawData, clientIp, imei, socketNo);
@@ -132,13 +150,22 @@ public class TcpSocketServer {
                         } catch (Exception e) {
                             log.warn("⚠️ Invalid JSON format: {}", e.getMessage());
                         }
-                        continue;
                     } else if (rawData.startsWith("<") && rawData.endsWith(">")) {
                         rawData = rawData.substring(1, rawData.length() - 1);
-
                         String[] parts = rawData.split("\\|");
+                        imei = parts[0];
+                        saveRawOnly(rawData, clientIp, imei, socketNo);
+
+                        // Check sending rate
+                        long lastTime = imeiToLastReceivedTime.getOrDefault(imei, 0L);
+                        long elapsed = now - lastTime;
+                        if (elapsed < sendDelayMs) {
+                            log.warn("⏱️ IMEI {} sending too fast ({}ms < {}ms), message ignored", imei, elapsed, sendDelayMs);
+                            continue;
+                        }
+                        imeiToLastReceivedTime.put(imei, now);
+
                         if (parts.length == 5) {
-                            imei = parts[0];
                             if (!masterTcpSocketRepository.existsByDeviceId(imei)) {
                                 log.warn("IMEI {} not registered", imei);
                                 continue;
@@ -146,8 +173,7 @@ public class TcpSocketServer {
 
                             updateConnectionState(imei, socketNo, true);
                             imeiToSocketMap.put(imei, socket);
-                            saveRawOnly(rawData, clientIp, imei, socketNo);
-                            processIncomingMessage(imei, parts, socketNo);
+                            processTextMessage(imei, parts, socketNo);
                         } else {
                             log.warn("❗ Invalid message: {}", rawData);
                         }
@@ -159,11 +185,13 @@ public class TcpSocketServer {
             } catch (IOException e) {
                 log.error("💥 Connection error from {}: {}", clientIp, e.getMessage());
             } finally {
+                timeoutTask.cancel(true);
+                scheduler.shutdown();
                 if (imei != null) {
                     updateConnectionState(imei, socketNo, false);
                     log.info("❎ IMEI {} disconnected (socket {})", imei, socketNo);
                 }
-                imeiToSocketMap.remove(imei);
+                if (imeiToSocketMap.get(imei) != null) imeiToSocketMap.remove(imei);
             }
         }).start();
     }
@@ -176,7 +204,7 @@ public class TcpSocketServer {
         masterTcpSocketRepository.save(tcpSocket);
     }
 
-    private void processIncomingMessage(String imei, String[] parts, String socketNo) {
+    private void processTextMessage(String imei, String[] parts, String socketNo) {
         try {
             MainBox mainBox = new MainBox();
             mainBox.setImei(imei);
@@ -222,7 +250,7 @@ public class TcpSocketServer {
         inBox.setProcessStatus("N");
         inBoxRepository.save(inBox);
 
-        log.info("📥 Raw message saved for IMEI {}", imei);
+        log.info("✅ Raw message saved for IMEI {}", imei);
     }
 
     public int getActiveConnectionCount() {
@@ -236,24 +264,24 @@ public class TcpSocketServer {
             return;
         }
 
-        synchronized (imei.intern()) {
-            Long lastSent = imeiToLastSentTime.getOrDefault(imei, 0L);
-            long now = System.currentTimeMillis();
-            long waitTime = sendDelayMs - (now - lastSent);
-            if (waitTime > 0) {
-                try {
-                    Thread.sleep(waitTime);
-                } catch (InterruptedException ignored) {}
-            }
+        try {
+            socket.getOutputStream().write((message + "\n").getBytes());
+            socket.getOutputStream().flush();
+            log.info("📤 Sent message to IMEI {}: {}", imei, message);
+        } catch (IOException e) {
+            log.error("❌ Failed to send message to IMEI {}: {}", imei, e.getMessage());
+        }
+    }
 
-            try {
-                socket.getOutputStream().write((message + "\n").getBytes());
-                socket.getOutputStream().flush();
-                imeiToLastSentTime.put(imei, System.currentTimeMillis());
-                log.info("📤 Sent message to IMEI {}: {}", imei, message);
-            } catch (IOException e) {
-                log.error("❌ Failed to send message to IMEI {}: {}", imei, e.getMessage());
+    @PreDestroy
+    public void shutdownServer() {
+        try {
+            if (serverSocket != null && !serverSocket.isClosed()) {
+                serverSocket.close();
+                log.info("🛑 TCP Server stopped and port {} released", portSocketServer);
             }
+        } catch (IOException e) {
+            log.error("Error closing ServerSocket", e);
         }
     }
 }
