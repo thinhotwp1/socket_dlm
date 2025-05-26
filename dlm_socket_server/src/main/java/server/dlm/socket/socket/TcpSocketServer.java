@@ -88,113 +88,138 @@ public class TcpSocketServer {
      * }</p>
      */
     private void handleConnection(Socket socket, String clientIp) {
-        new Thread(() -> {
-
-            String socketNo = UUID.randomUUID().toString();
-            String imei = null;
-            AtomicBoolean hasReceivedData = new AtomicBoolean(false);
-
-            // Scheduler to close connection if after 30s no received any message
-            ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
-            ScheduledFuture<?> timeoutTask = scheduler.schedule(() -> {
-                if (!hasReceivedData.get()) {
-                    try {
-                        log.warn("⏱️ No data received within 30s from client {} → closing connection", clientIp);
-                        socket.close();
-                    } catch (IOException ignored) {
-                    }
-                }
-            }, 30, TimeUnit.SECONDS);
-
-            try (socket;
-                 BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream()))) {
-                log.info("🔌 Client {} connected", clientIp);
-
-                String rawData;
-
-                while ((rawData = reader.readLine()) != null) {
-                    hasReceivedData.set(true);
-                    rawData = rawData.trim();
-                    log.info("📥 Received from {}: {}", clientIp, rawData);
-
-                    long now = System.currentTimeMillis();
-
-                    if (rawData.startsWith("{") && rawData.endsWith("}")) {
-                        try {
-                            JsonNode json = objectMapper.readTree(rawData);
-                            if (json.has("imei")) {
-                                imei = json.get("imei").asText();
-
-                                // Check sending rate
-                                long lastTime = imeiToLastReceivedTime.getOrDefault(imei, 0L);
-                                long elapsed = now - lastTime;
-                                if (elapsed < sendDelayMs) {
-                                    log.warn("⏱️ IMEI {} sending too fast ({}ms < {}ms), message ignored", imei, elapsed, sendDelayMs);
-                                    continue;
-                                }
-                                imeiToLastReceivedTime.put(imei, now);
-
-                                updateConnectionState(imei, socketNo, true);
-                                imeiToSocketMap.put(imei, socket);
-                                saveRawOnly(rawData, clientIp, imei, socketNo);
-
-                                if (json.hasNonNull("voltage") && json.hasNonNull("current") &&
-                                        json.hasNonNull("powerFactor") && json.hasNonNull("status")) {
-                                    processJsonMessage(json, imei, socketNo);
-                                } else {
-                                    log.warn("⚠️ Missing data fields in JSON for IMEI {}", imei);
-                                }
-                            } else {
-                                log.warn("⚠️ JSON missing IMEI: {}", rawData);
-                            }
-                        } catch (Exception e) {
-                            log.warn("⚠️ Invalid JSON format: {}", e.getMessage());
-                        }
-                    } else if (rawData.startsWith("<") && rawData.endsWith(">")) {
-                        rawData = rawData.substring(1, rawData.length() - 1);
-                        String[] parts = rawData.split("\\|");
-                        imei = parts[0];
-                        saveRawOnly(rawData, clientIp, imei, socketNo);
-
-                        // Check sending rate
-                        long lastTime = imeiToLastReceivedTime.getOrDefault(imei, 0L);
-                        long elapsed = now - lastTime;
-                        if (elapsed < sendDelayMs) {
-                            log.warn("⏱️ IMEI {} sending too fast ({}ms < {}ms), message ignored", imei, elapsed, sendDelayMs);
-                            continue;
-                        }
-                        imeiToLastReceivedTime.put(imei, now);
-
-                        if (parts.length == 5) {
-                            if (!masterTcpSocketRepository.existsByDeviceId(imei)) {
-                                log.warn("IMEI {} not registered", imei);
-                                continue;
-                            }
-
-                            updateConnectionState(imei, socketNo, true);
-                            imeiToSocketMap.put(imei, socket);
-                            processTextMessage(imei, parts, socketNo);
-                        } else {
-                            log.warn("❗ Invalid message: {}", rawData);
-                        }
-                    } else {
-                        log.warn("❗ Invalid message: {} ", rawData);
-                    }
-                }
-
-            } catch (IOException e) {
-                log.error("💥 Connection error from {}: {}", clientIp, e.getMessage());
-            } finally {
-                timeoutTask.cancel(true);
-                scheduler.shutdown();
-                if (imei != null) {
-                    updateConnectionState(imei, socketNo, false);
-                    log.info("❎ IMEI {} disconnected (socket {})", imei, socketNo);
-                }
-                if (imeiToSocketMap.get(imei) != null) imeiToSocketMap.remove(imei);
-            }
-        }).start();
+        new Thread(() -> startConnectionThread(socket, clientIp)).start();
     }
+
+    private void startConnectionThread(Socket socket, String clientIp) {
+        String socketNo = UUID.randomUUID().toString();
+        AtomicBoolean authenticated = new AtomicBoolean(false);
+        AtomicBoolean hasReceivedLogin = new AtomicBoolean(false);
+        String[] imeiHolder = new String[1];  // Trick to mutate from inner scope
+
+        ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+        ScheduledFuture<?> timeoutTask = scheduler.schedule(() -> {
+            if (!hasReceivedLogin.get()) {
+                log.warn("⏱️ No login received within 30s from client {} → closing connection", clientIp);
+                tryClose(socket);
+            }
+        }, 30, TimeUnit.SECONDS);
+
+        try (socket;
+             BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream()))) {
+            log.info("🔌 Client {} connected", clientIp);
+
+            // Wait for login before processing further
+            if (!waitForLogin(reader, socket, clientIp, authenticated, hasReceivedLogin, imeiHolder, socketNo)) {
+                return;
+            }
+
+            String imei = imeiHolder[0];
+            String rawData;
+
+            while ((rawData = reader.readLine()) != null) {
+                processIncomingData(rawData.trim(), imei, clientIp, socketNo);
+            }
+
+        } catch (IOException e) {
+            log.error("💥 Connection error from {}: {}", clientIp, e.getMessage());
+        } finally {
+            timeoutTask.cancel(true);
+            scheduler.shutdown();
+            handleSocketCleanup(imeiHolder[0], socketNo);
+        }
+    }
+
+    private boolean waitForLogin(BufferedReader reader, Socket socket, String clientIp,
+                                 AtomicBoolean authenticated, AtomicBoolean hasReceivedLogin,
+                                 String[] imeiHolder, String socketNo) throws IOException {
+        String rawData;
+        while ((rawData = reader.readLine()) != null) {
+            rawData = rawData.trim();
+            log.info("📥 Received from {}: {}", clientIp, rawData);
+
+            if (isLoginPacket(rawData)) {
+                String[] parts = rawData.substring(1, rawData.length() - 1).split("\\|");
+                String imei = parts[0];
+                hasReceivedLogin.set(true);
+
+                if (!authenticateDevice(imei)) {
+                    log.warn("❌ IMEI {} not in whitelist → closing connection", imei);
+                    tryClose(socket);
+                    return false;
+                }
+
+                authenticated.set(true);
+                imeiHolder[0] = imei;
+                updateConnectionState(imei, socketNo, true);
+                imeiToSocketMap.put(imei, socket);
+                log.info("✅ Device {} authenticated successfully", imei);
+                return true;
+            } else {
+                log.warn("⚠️ Ignored non-login packet before authentication: {}", rawData);
+            }
+        }
+        return false;
+    }
+
+    private boolean isLoginPacket(String rawData) {
+        return rawData.startsWith("<") && rawData.endsWith(">") && rawData.contains("|LOGIN>");
+    }
+
+    private boolean authenticateDevice(String imei) {
+        return masterTcpSocketRepository.existsByDeviceId(imei);
+    }
+
+    private void processIncomingData(String rawData, String imei, String clientIp, String socketNo) {
+        long now = System.currentTimeMillis();
+        long lastTime = imeiToLastReceivedTime.getOrDefault(imei, 0L);
+        long elapsed = now - lastTime;
+
+        if (elapsed < sendDelayMs) {
+            log.warn("⏱️ IMEI {} sending too fast ({}ms < {}ms), message ignored", imei, elapsed, sendDelayMs);
+            return;
+        }
+
+        imeiToLastReceivedTime.put(imei, now);
+        saveRawOnly(rawData, clientIp, imei, socketNo);
+
+        try {
+            if (rawData.startsWith("{") && rawData.endsWith("}")) {
+                JsonNode json = objectMapper.readTree(rawData);
+                if (json.has("imei")) {
+                    processJsonMessage(json, imei, socketNo);
+                } else {
+                    log.warn("⚠️ JSON missing IMEI: {}", rawData);
+                }
+            } else if (rawData.startsWith("<") && rawData.endsWith(">")) {
+                String[] parts = rawData.substring(1, rawData.length() - 1).split("\\|");
+                if (parts.length == 5) {
+                    processTextMessage(imei, parts, socketNo);
+                } else {
+                    log.warn("❗ Invalid message format after login: {}", rawData);
+                }
+            } else {
+                log.warn("❗ Unknown message format after login: {}", rawData);
+            }
+        } catch (Exception e) {
+            log.warn("⚠️ Error processing message: {}", e.getMessage());
+        }
+    }
+
+    private void handleSocketCleanup(String imei, String socketNo) {
+        if (imei != null) {
+            updateConnectionState(imei, socketNo, false);
+            log.info("❎ IMEI {} disconnected (socket {})", imei, socketNo);
+            imeiToSocketMap.remove(imei);
+        }
+    }
+
+    private void tryClose(Socket socket) {
+        try {
+            socket.close();
+        } catch (IOException ignored) {}
+    }
+
 
     private void updateConnectionState(String imei, String socketNo, boolean connected) {
         MasterTcpSocket tcpSocket = masterTcpSocketRepository.findByDeviceId(imei);
